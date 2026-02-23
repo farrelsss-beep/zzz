@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Head Dodge: 1000 Point Challenge</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.123.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jeelizfacetransfer/dist/jeelizFaceTransfer.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { display: block; }
+        
+        #ui {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: white; pointer-events: none; z-index: 10;
+        }
+
+        #score-container { font-size: 24px; font-weight: bold; text-shadow: 2px 2px #ff4d6d; }
+        
+        #camera-view {
+            position: absolute; bottom: 10px; right: 10px;
+            width: 120px; height: 90px; border: 2px solid white;
+            border-radius: 10px; transform: scaleX(-1);
+        }
+
+        #msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(255, 77, 109, 0.9); padding: 20px; border-radius: 20px;
+            text-align: center; display: block; color: white; width: 80%;
+        }
+
+        button {
+            padding: 10px 20px; font-size: 18px; border: none;
+            border-radius: 10px; background: white; color: #ff4d6d;
+            font-weight: bold; cursor: pointer; margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="score-container">Cinta: <span id="score">0</span> / 1000</div>
+        <p id="hint">Gelengkan kepala ke kiri/kanan untuk menghindar!</p>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="camera-view"></canvas>
+
+    <div id="msg">
+        <h2 id="msg-title">Siap Bermain?</h2>
+        <p id="msg-p">Capai 1000 poin untuk membuktikan cintamu! Setiap rintangan bernilai 5 poin.</p>
+        <button onclick="startGame()">MULAI GAME</button>
+    </div>
+
+<script>
+    let score = 0;
+    let isGameRunning = false;
+    let playerX = 0;
+    const obstacles = [];
+    let scene, camera, renderer, player;
+
+    function initThree() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xfff0f3);
+        
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        // Pencahayaan
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(0, 5, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        // Pemain (Karakter Hati/Kotak)
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshPhongMaterial({ color: 0xff4d6d });
+        player = new THREE.Mesh(geometry, material);
+        player.position.y = -2;
+        scene.add(player);
+
+        camera.position.z = 5;
+        camera.position.y = 1;
+    }
+
+    function startGame() {
+        document.getElementById('msg').style.display = 'none';
+        
+        // Init Face Tracking
+        JEEFACETRANSFERAPI.init({
+            canvasId: 'camera-view',
+            NNCPath: 'https://cdn.jsdelivr.net/npm/jeelizfacetransfer/dist/',
+            callbackReady: function(err) {
+                if (err) {
+                    alert("Kamera tidak terdeteksi atau izin ditolak!");
+                    return;
+                }
+                isGameRunning = true;
+                animate();
+            }
+        });
+    }
+
+    function createObstacle() {
+        const geo = new THREE.BoxGeometry(1.5, 0.5, 0.5);
+        const mat = new THREE.MeshPhongMaterial({ color: 0x590d22 });
+        const obs = new THREE.Mesh(geo, mat);
+        obs.position.x = (Math.random() - 0.5) * 6;
+        obs.position.z = -20;
+        obs.passed = false;
+        scene.add(obs);
+        obstacles.push(obs);
+    }
+
+    function animate() {
+        if (!isGameRunning) return;
+        requestAnimationFrame(animate);
+
+        // Ambil rotasi kepala (Geleng-geleng)
+        // rot[1] adalah yaw (kiri-kanan)
+        const rotation = JEEFACETRANSFERAPI.get_rotationMorph();
+        if (rotation) {
+            playerX = -rotation[1] * 10; // Sensitivitas geleng kepala
+            player.position.x = THREE.MathUtils.lerp(player.position.x, playerX, 0.1);
+        }
+
+        // Spawn rintangan
+        if (Math.random() < 0.03) createObstacle();
+
+        // Gerakkan rintangan
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].position.z += 0.2;
+
+            // Cek Tabrakan
+            if (obstacles[i].position.z > -0.5 && obstacles[i].position.z < 0.5) {
+                if (Math.abs(obstacles[i].position.x - player.position.x) < 1.2) {
+                    gameOver();
+                }
+            }
+
+            // Hitung Poin (Jika rintangan terlewati)
+            if (obstacles[i].position.z > 1 && !obstacles[i].passed) {
+                score += 5;
+                obstacles[i].passed = true;
+                document.getElementById('score').innerText = score;
+                checkWin();
+            }
+
+            // Hapus rintangan lama
+            if (obstacles[i].position.z > 5) {
+                scene.remove(obstacles[i]);
+                obstacles.splice(i, 1);
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    function checkWin() {
+        if (score >= 1000) {
+            isGameRunning = false;
+            document.getElementById('msg-title').innerText = "CINTA SEJATI! ❤️";
+            document.getElementById('msg-p').innerText = "Selamat! Kamu berhasil melewati rintangan dengan 1000 poin.";
+            document.getElementById('msg').style.display = 'block';
+        }
+    }
+
+    function gameOver() {
+        isGameRunning = false;
+        document.getElementById('msg-title').innerText = "Yah, Nabrak! 💔";
+        document.getElementById('msg-p').innerText = "Skormu: " + score + ". Coba lebih fokus lagi ya!";
+        document.getElementById('msg').style.display = 'block';
+        
+        // Bersihkan rintangan
+        obstacles.forEach(o => scene.remove(o));
+        obstacles.length = 0;
+        score = 0;
+        document.getElementById('score').innerText = score;
+    }
+
+    initThree();
+</script>
+</body>
+</html>
